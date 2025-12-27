@@ -261,15 +261,16 @@ We integrate vision-aided discriminators from the [vision-aided-loss](https://gi
 To enable vision-aided loss during training, add the following options:
 
 ```bash
-python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan \
-    --use_vision_aided_loss \
-    --cv_type clip \
-    --cv_output_type conv_multi_level \
-    --cv_loss multilevel_sigmoid_s \
-    --cv_lambda 1.0 \
-    --cv_diffaug \
-    --cv_lr 0.0002 \
-    --cv_warmup_iter 0
+python train.py --dataroot ./datasets/fog --name fog_cvD_cyclegan --model cycle_gan \
+      --use_vision_aided_loss \
+      --cv_type clip \
+      --cv_output_type conv_multi_level \
+      --cv_loss multilevel_sigmoid_s \
+      --cv_lambda 0.5 \
+      --cv_diffaug \
+      --cv_lr 0.0001 \
+      --cv_warmup_iter 2000 \
+      > train-fog-vision-aided-loss.log 2>&1
 ```
 
 **Options:**
