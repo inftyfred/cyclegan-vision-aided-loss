@@ -252,6 +252,42 @@ Best practice for training and testing your models.
 
 Before you post a new question, please first look at the above Q & A and existing GitHub issues.
 
+## Vision-Aided Loss for CycleGAN
+
+We integrate vision-aided discriminators from the [vision-aided-loss](https://github.com/nupurkmr9/vision-aided-gan) library into CycleGAN training, which can improve performance by leveraging pretrained vision models.
+
+### Usage
+
+To enable vision-aided loss during training, add the following options:
+
+```bash
+python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_gan \
+    --use_vision_aided_loss \
+    --cv_type clip \
+    --cv_output_type conv_multi_level \
+    --cv_loss multilevel_sigmoid_s \
+    --cv_lambda 1.0 \
+    --cv_diffaug \
+    --cv_lr 0.0002
+```
+
+**Options:**
+- `--use_vision_aided_loss`: Enable vision-aided discriminator (default: False)
+- `--cv_type`: Pretrained model type (e.g., clip, dino, swin, vgg). Multiple models can be combined with '+' (default: clip)
+- `--cv_output_type`: Output type of the vision model (e.g., conv, conv_multi_level). For multiple models, use '+' separated types (default: conv_multi_level)
+- `--cv_loss`: Loss type for vision-aided discriminator (e.g., sigmoid, multilevel_sigmoid_s, hinge) (default: multilevel_sigmoid_s)
+- `--cv_lambda`: Weight for vision-aided loss (default: 1.0)
+- `--cv_diffaug`: Enable DiffAugment for vision-aided discriminator (default: True). Use `--no_cv_diffaug` to disable.
+- `--cv_lr`: Learning rate for the vision-aided discriminator decoder (default: 0.0002)
+
+The vision-aided discriminator shares the same architecture as in StyleGAN3 integration. The pretrained feature extractor is frozen, and only the decoder head is trained.
+
+### Notes
+- The vision-aided loss is added to both discriminator and generator losses.
+- The original CycleGAN losses remain unchanged; vision-aided loss is an additional term.
+- Requires the `vision_aided_loss` package. It is included as a submodule in this repository.
+- For more details on vision-aided GAN, see the [original paper](https://arxiv.org/abs/2112.09130).
+
 ## Custom Model and Dataset
 
 If you plan to implement custom models and dataset for your new applications, we provide a dataset [template](data/template_dataset.py) and a model [template](models/template_model.py) as a starting point.

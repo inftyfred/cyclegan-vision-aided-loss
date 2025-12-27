@@ -4,6 +4,13 @@ from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
 
+# Try to import vision_aided_loss, but make it optional
+try:
+    import vision_aided_loss
+except ImportError:
+    vision_aided_loss = None
+    print("Warning: vision_aided_loss not installed. Vision-aided loss will be unavailable.")
+
 
 class CycleGANModel(BaseModel):
     """
@@ -47,6 +54,14 @@ class CycleGANModel(BaseModel):
                 default=0.5,
                 help="use identity mapping. Setting lambda_identity other than 0 has an effect of scaling the weight of the identity mapping loss. For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set lambda_identity = 0.1",
             )
+            # Vision-aided loss options
+            parser.add_argument("--use_vision_aided_loss", action="store_true", help="whether to use vision-aided discriminator")
+            parser.add_argument("--cv_type", type=str, default="clip", help="pretrained model type for vision-aided loss (e.g., clip, dino, swin, vgg)")
+            parser.add_argument("--cv_output_type", type=str, default="conv_multi_level", help="output type for vision-aided discriminator (e.g., conv, conv_multi_level)")
+            parser.add_argument("--cv_loss", type=str, default="multilevel_sigmoid_s", help="loss type for vision-aided discriminator (e.g., sigmoid, multilevel_sigmoid_s, hinge)")
+            parser.add_argument("--cv_lambda", type=float, default=1.0, help="weight for vision-aided loss")
+            parser.add_argument("--cv_diffaug", action="store_true", default=True, help="whether to use DiffAugment in vision-aided discriminator (default: True)")
+            parser.add_argument("--cv_lr", type=float, default=0.0002, help="learning rate for vision-aided discriminator decoder")
 
         return parser
 
@@ -70,6 +85,9 @@ class CycleGANModel(BaseModel):
         # specify the models you want to save to the disk. The training/test scripts will call <BaseModel.save_networks> and <BaseModel.load_networks>.
         if self.isTrain:
             self.model_names = ["G_A", "G_B", "D_A", "D_B"]
+            # Add vision-aided discriminator if enabled
+            if opt.use_vision_aided_loss and vision_aided_loss is not None:
+                self.model_names.append("cvD")
         else:  # during test time, only load Gs
             self.model_names = ["G_A", "G_B"]
 
@@ -84,6 +102,10 @@ class CycleGANModel(BaseModel):
             self.netD_B = networks.define_D(opt.input_nc, opt.ndf, opt.netD, opt.n_layers_D, opt.norm, opt.init_type, opt.init_gain)
 
         if self.isTrain:
+            # Add vision-aided loss names if enabled
+            if opt.use_vision_aided_loss and vision_aided_loss is not None:
+                self.loss_names.extend(["D_A_cv", "D_B_cv", "G_A_cv", "G_B_cv"])
+
             if opt.lambda_identity > 0.0:  # only works when input and output images have the same number of channels
                 assert opt.input_nc == opt.output_nc
             self.fake_A_pool = ImagePool(opt.pool_size)  # create image buffer to store previously generated images
@@ -92,6 +114,35 @@ class CycleGANModel(BaseModel):
             self.criterionGAN = networks.GANLoss(opt.gan_mode).to(self.device)  # define GAN loss.
             self.criterionCycle = torch.nn.L1Loss()
             self.criterionIdt = torch.nn.L1Loss()
+
+            # initialize vision-aided discriminator if enabled
+            if opt.use_vision_aided_loss and vision_aided_loss is not None:
+                # Handle cv_diffaug default: if not specified, default to True
+                cv_diffaug = opt.cv_diffaug if hasattr(opt, 'cv_diffaug') else True
+                self.netcvD = vision_aided_loss.Discriminator(
+                    cv_type=opt.cv_type,
+                    output_type=opt.cv_output_type,
+                    loss_type=opt.cv_loss,
+                    diffaug=cv_diffaug,
+                    device=self.device,
+                    num_classes=0  # unconditional
+                )
+                # Freeze the pretrained feature extractor
+                self.netcvD.cv_ensemble.requires_grad_(False)
+                # Only decoder parameters are trainable
+                self.netcvD.decoder.requires_grad_(True)
+                # Move to device
+                self.netcvD.to(self.device)
+                # Create optimizer for decoder only
+                self.optimizer_cvD = torch.optim.Adam(
+                    self.netcvD.decoder.parameters(),
+                    lr=opt.cv_lr,
+                    betas=(opt.beta1, 0.999)
+                )
+                self.optimizers.append(self.optimizer_cvD)
+            else:
+                self.netcvD = None
+
             # initialize optimizers; schedulers will be automatically created by function <BaseModel.setup>.
             self.optimizer_G = torch.optim.Adam(itertools.chain(self.netG_A.parameters(), self.netG_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizer_D = torch.optim.Adam(itertools.chain(self.netD_A.parameters(), self.netD_B.parameters()), lr=opt.lr, betas=(opt.beta1, 0.999))
@@ -145,10 +196,34 @@ class CycleGANModel(BaseModel):
         fake_B = self.fake_B_pool.query(self.fake_B)
         self.loss_D_A = self.backward_D_basic(self.netD_A, self.real_B, fake_B)
 
+        # Vision-aided discriminator loss for domain B (real_B vs fake_B)
+        if self.netcvD is not None:
+            # Real images from domain B
+            loss_cv_real = self.netcvD(self.real_B, for_real=True)
+            # Fake images generated by G_A
+            loss_cv_fake = self.netcvD(fake_B.detach(), for_real=False)
+            # Combine losses with weight
+            self.loss_D_A_cv = (loss_cv_real + loss_cv_fake) * 0.5 * self.opt.cv_lambda
+            self.loss_D_A_cv.backward()
+        else:
+            self.loss_D_A_cv = 0.0
+
     def backward_D_B(self):
         """Calculate GAN loss for discriminator D_B"""
         fake_A = self.fake_A_pool.query(self.fake_A)
         self.loss_D_B = self.backward_D_basic(self.netD_B, self.real_A, fake_A)
+
+        # Vision-aided discriminator loss for domain A (real_A vs fake_A)
+        if self.netcvD is not None:
+            # Real images from domain A
+            loss_cv_real = self.netcvD(self.real_A, for_real=True)
+            # Fake images generated by G_B
+            loss_cv_fake = self.netcvD(fake_A.detach(), for_real=False)
+            # Combine losses with weight
+            self.loss_D_B_cv = (loss_cv_real + loss_cv_fake) * 0.5 * self.opt.cv_lambda
+            self.loss_D_B_cv.backward()
+        else:
+            self.loss_D_B_cv = 0.0
 
     def backward_G(self):
         """Calculate the loss for generators G_A and G_B"""
@@ -171,12 +246,19 @@ class CycleGANModel(BaseModel):
         self.loss_G_A = self.criterionGAN(self.netD_A(self.fake_B), True)
         # GAN loss D_B(G_B(B))
         self.loss_G_B = self.criterionGAN(self.netD_B(self.fake_A), True)
+        # Vision-aided discriminator loss for generators
+        if self.netcvD is not None:
+            self.loss_G_A_cv = self.netcvD(self.fake_B, for_G=True) * self.opt.cv_lambda
+            self.loss_G_B_cv = self.netcvD(self.fake_A, for_G=True) * self.opt.cv_lambda
+        else:
+            self.loss_G_A_cv = 0.0
+            self.loss_G_B_cv = 0.0
         # Forward cycle loss || G_B(G_A(A)) - A||
         self.loss_cycle_A = self.criterionCycle(self.rec_A, self.real_A) * lambda_A
         # Backward cycle loss || G_A(G_B(B)) - B||
         self.loss_cycle_B = self.criterionCycle(self.rec_B, self.real_B) * lambda_B
         # combined loss and calculate gradients
-        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B
+        self.loss_G = self.loss_G_A + self.loss_G_B + self.loss_cycle_A + self.loss_cycle_B + self.loss_idt_A + self.loss_idt_B + self.loss_G_A_cv + self.loss_G_B_cv
         self.loss_G.backward()
 
     def optimize_parameters(self):
@@ -191,6 +273,10 @@ class CycleGANModel(BaseModel):
         # D_A and D_B
         self.set_requires_grad([self.netD_A, self.netD_B], True)
         self.optimizer_D.zero_grad()  # set D_A and D_B's gradients to zero
+        if self.netcvD is not None:
+            self.optimizer_cvD.zero_grad()  # set cvD decoder gradients to zero
         self.backward_D_A()  # calculate gradients for D_A
         self.backward_D_B()  # calculate graidents for D_B
         self.optimizer_D.step()  # update D_A and D_B's weights
+        if self.netcvD is not None:
+            self.optimizer_cvD.step()  # update cvD decoder weights
