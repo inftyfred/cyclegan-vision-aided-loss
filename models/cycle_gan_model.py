@@ -3,6 +3,7 @@ import itertools
 from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
+#from vision_aided_loss.cv_discriminator import Discriminator
 
 # Try to import vision_aided_loss, but make it optional
 try:
