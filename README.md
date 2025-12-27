@@ -268,7 +268,8 @@ python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_ga
     --cv_loss multilevel_sigmoid_s \
     --cv_lambda 1.0 \
     --cv_diffaug \
-    --cv_lr 0.0002
+    --cv_lr 0.0002 \
+    --cv_warmup_iter 0
 ```
 
 **Options:**
@@ -279,11 +280,14 @@ python train.py --dataroot ./datasets/maps --name maps_cyclegan --model cycle_ga
 - `--cv_lambda`: Weight for vision-aided loss (default: 1.0)
 - `--cv_diffaug`: Enable DiffAugment for vision-aided discriminator (default: True). Use `--no_cv_diffaug` to disable.
 - `--cv_lr`: Learning rate for the vision-aided discriminator decoder (default: 0.0002)
+- `--cv_warmup_iter`: Number of warmup iterations before applying vision-aided loss (default: 0)
 
-The vision-aided discriminator shares the same architecture as in StyleGAN3 integration. The pretrained feature extractor is frozen, and only the decoder head is trained.
+The vision-aided discriminators share the same architecture as in StyleGAN3 integration. Two independent vision-aided discriminators are created for domains A and B, each with its own decoder head (parameters are not shared). The pretrained feature extractors are frozen, and only the decoder heads are trained.
 
 ### Notes
+- Two independent vision-aided discriminators are used: `cvD_A` for domain B (paired with `D_A`) and `cvD_B` for domain A (paired with `D_B`).
 - The vision-aided loss is added to both discriminator and generator losses.
+- The `--cv_warmup_iter` parameter controls when vision-aided loss starts being applied, allowing the GAN to stabilize first.
 - The original CycleGAN losses remain unchanged; vision-aided loss is an additional term.
 - Requires the `vision_aided_loss` package. It is included as a submodule in this repository.
 - For more details on vision-aided GAN, see the [original paper](https://arxiv.org/abs/2112.09130).
