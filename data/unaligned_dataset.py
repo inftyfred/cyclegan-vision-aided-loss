@@ -14,7 +14,28 @@ class UnalignedDataset(BaseDataset):
     You can train the model with the dataset flag '--dataroot /path/to/data'.
     Similarly, you need to prepare two directories:
     '/path/to/data/testA' and '/path/to/data/testB' during test time.
+
+    Alternatively, you can directly specify the paths to domain A and B images using
+    --dataroot_A and --dataroot_B flags. If both are provided, they override the default
+    dataroot/phaseA and dataroot/phaseB behavior.
     """
+
+    @staticmethod
+    def modify_commandline_options(parser, is_train):
+        """Add new dataset-specific options, and rewrite default values for existing options.
+
+        Parameters:
+            parser          -- original option parser
+            is_train (bool) -- whether training phase or test phase. You can use this flag to add training-specific or test-specific options.
+
+        Returns:
+            the modified parser.
+        """
+        parser.add_argument('--dataroot_A', type=str, default=None,
+                           help='direct path to domain A images (e.g., /path/to/trainA). If specified, overrides the default dataroot/phaseA behavior.')
+        parser.add_argument('--dataroot_B', type=str, default=None,
+                           help='direct path to domain B images (e.g., /path/to/trainB). If specified, overrides the default dataroot/phaseB behavior.')
+        return parser
 
     def __init__(self, opt):
         """Initialize this dataset class.
@@ -23,8 +44,20 @@ class UnalignedDataset(BaseDataset):
             opt (Option class) -- stores all the experiment flags; needs to be a subclass of BaseOptions
         """
         BaseDataset.__init__(self, opt)
-        self.dir_A = os.path.join(opt.dataroot, opt.phase + "A")  # create a path '/path/to/data/trainA'
-        self.dir_B = os.path.join(opt.dataroot, opt.phase + "B")  # create a path '/path/to/data/trainB'
+        # Determine directories for domain A and B
+        # If dataroot_A and dataroot_B are provided, use them directly
+        # Otherwise, fall back to the original behavior (dataroot/phaseA, dataroot/phaseB)
+        has_dataroot_A = opt.dataroot_A is not None
+        has_dataroot_B = opt.dataroot_B is not None
+
+        if has_dataroot_A and has_dataroot_B:
+            self.dir_A = opt.dataroot_A
+            self.dir_B = opt.dataroot_B
+        elif not has_dataroot_A and not has_dataroot_B:
+            self.dir_A = os.path.join(opt.dataroot, opt.phase + "A")  # create a path '/path/to/data/trainA'
+            self.dir_B = os.path.join(opt.dataroot, opt.phase + "B")  # create a path '/path/to/data/trainB'
+        else:
+            raise ValueError('Both --dataroot_A and --dataroot_B must be specified together, or neither.')
 
         self.A_paths = sorted(make_dataset(self.dir_A, opt.max_dataset_size))  # load images from '/path/to/data/trainA'
         self.B_paths = sorted(make_dataset(self.dir_B, opt.max_dataset_size))  # load images from '/path/to/data/trainB'
