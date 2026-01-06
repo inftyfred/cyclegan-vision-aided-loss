@@ -267,7 +267,7 @@ python train.py --dataroot ./datasets/fog --name fog_cvD_cyclegan --model cycle_
       --cv_output_type conv_multi_level \
       --cv_loss multilevel_sigmoid_s \
       --cv_lambda 0.5 \
-      --cv_diffaug \
+      --cv_diffaug  \
       --cv_lr 0.0001 \
       --cv_warmup_iter 2000 \
       > train-fog-vision-aided-loss.log 2>&1
