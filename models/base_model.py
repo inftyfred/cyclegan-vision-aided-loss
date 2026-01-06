@@ -45,6 +45,24 @@ class BaseModel(ABC):
         self.image_paths = []
         self.metric = 0  # used for learning rate policy 'plateau'
 
+    def _get_model_filename(self, name):
+        """Convert internal model name to filename with domainA/domainB replacements.
+
+        Parameters:
+            name (str): Internal model name (e.g., 'G_A', 'D_B', 'cvD_A')
+
+        Returns:
+            str: Filename with domainA/domainB replacements
+        """
+        # Replace _A with _domainA and _B with _domainB
+        # This preserves the original behavior when domainA='A' and domainB='B'
+        result = name
+        if hasattr(self.opt, 'domainA'):
+            result = result.replace('_A', f'_{self.opt.domainA}2{self.opt.domainB}')
+        if hasattr(self.opt, 'domainB'):
+            result = result.replace('_B', f'_{self.opt.domainB}2{self.opt.domainA}')
+        return result
+
     @staticmethod
     def modify_commandline_options(parser, is_train):
         """Add new model-specific options, and rewrite default values for existing options.
@@ -92,7 +110,8 @@ class BaseModel(ABC):
                 # Load networks if needed
                 if not self.isTrain or opt.continue_train:
                     load_suffix = f"iter_{opt.load_iter}" if opt.load_iter > 0 else opt.epoch
-                    load_filename = f"{load_suffix}_net_{name}.pth"
+                    filename_name = self._get_model_filename(name)
+                    load_filename = f"{load_suffix}_net_{filename_name}.pth"
                     load_path = self.save_dir / load_filename
 
                     if isinstance(net, torch.nn.parallel.DistributedDataParallel):
@@ -189,7 +208,8 @@ class BaseModel(ABC):
         if not dist.is_initialized() or dist.get_rank() == 0:
             for name in self.model_names:
                 if isinstance(name, str):
-                    save_filename = f"{epoch}_net_{name}.pth"
+                    filename_name = self._get_model_filename(name)
+                    save_filename = f"{epoch}_net_{filename_name}.pth"
                     save_path = self.save_dir / save_filename
                     net = getattr(self, "net" + name)
 
@@ -223,7 +243,8 @@ class BaseModel(ABC):
 
         for name in self.model_names:
             if isinstance(name, str):
-                load_filename = f"{epoch}_net_{name}.pth"
+                filename_name = self._get_model_filename(name)
+                load_filename = f"{epoch}_net_{filename_name}.pth"
                 load_path = self.save_dir / load_filename
                 net = getattr(self, "net" + name)
 

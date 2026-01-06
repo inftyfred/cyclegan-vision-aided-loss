@@ -37,6 +37,18 @@ class TestModel(BaseModel):
         """
         assert not opt.isTrain
         BaseModel.__init__(self, opt)
+
+        # Auto-generate model_suffix based on domainA, domainB and direction if not specified
+        if opt.model_suffix == "" and hasattr(opt, 'domainA') and hasattr(opt, 'domainB'):
+            if opt.domainA != "A" or opt.domainB != "B":  # Only auto-generate if custom domains are specified
+                if opt.direction == "AtoB":
+                    opt.model_suffix = f"_{opt.domainA}2{opt.domainB}"
+                elif opt.direction == "BtoA":
+                    opt.model_suffix = f"_{opt.domainB}2{opt.domainA}"
+                else:
+                    raise ValueError(f"Invalid direction: {opt.direction}. Must be 'AtoB' or 'BtoA'.")
+                print(f"Auto-generated model_suffix: {opt.model_suffix}")
+
         # specify the training losses you want to print out. The training/test scripts  will call <BaseModel.get_current_losses>
         self.loss_names = []
         # specify the images you want to save/display. The training/test scripts  will call <BaseModel.get_current_visuals>
