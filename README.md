@@ -113,6 +113,7 @@ cd pytorch-CycleGAN-and-pix2pix
 
 ```bash
 conda env create -f environment.yml
+pip install vision-aided-loss 		#if use vision-aided-loss
 ```
 
 and then activate the environment by
