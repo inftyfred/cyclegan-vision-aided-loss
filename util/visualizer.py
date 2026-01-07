@@ -7,6 +7,12 @@ from pathlib import Path
 import wandb
 import os
 import torch.distributed as dist
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_AVAILABLE = True
+except ImportError:
+    TENSORBOARD_AVAILABLE = False
+    SummaryWriter = None
 
 
 def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
@@ -71,6 +77,22 @@ class Visualizer:
             else:
                 self.wandb_run = None
 
+        # Initialize tensorboard if enabled
+        self.use_tensorboard = getattr(opt, "use_tensorboard", False)
+        self.tensorboard_writer = None
+        if self.use_tensorboard:
+            if not TENSORBOARD_AVAILABLE:
+                print("[Warning] TensorBoard is not available. Please install tensorboard with 'pip install tensorboard'.")
+            else:
+                # Only initialize tensorboard on main process (rank 0)
+                if not dist.is_initialized() or dist.get_rank() == 0:
+                    self.tensorboard_dir = Path(opt.checkpoints_dir) / opt.name / "tensorboard"
+                    util.mkdirs([self.tensorboard_dir])
+                    self.tensorboard_writer = SummaryWriter(log_dir=self.tensorboard_dir)
+                    print(f"TensorBoard logging enabled. Logs saved to {self.tensorboard_dir}")
+                else:
+                    self.tensorboard_writer = None
+
         if self.use_html:  # create an HTML object at <checkpoints_dir>/web/; images will be saved under <checkpoints_dir>/web/images/
             self.web_dir = Path(opt.checkpoints_dir) / opt.name / "web"
             self.img_dir = self.web_dir / "images"
@@ -109,6 +131,15 @@ class Visualizer:
                 ims_dict[f"results/{label}"] = wandb_image
             self.wandb_run.log(ims_dict, step=total_iters)
 
+        if self.use_tensorboard and self.tensorboard_writer is not None:
+            for label, image in visuals.items():
+                image_numpy = util.tensor2im(image)
+                # Convert numpy array to tensor for tensorboard (HWC uint8)
+                import torch
+                image_tensor = torch.from_numpy(image_numpy).float() / 255.0  # normalize to [0,1]
+                # TensorBoard expects CHW format, but we can use dataformats='HWC'
+                self.tensorboard_writer.add_image(f"images/{label}", image_tensor, total_iters, dataformats='HWC')
+
         if self.use_html and (save_result or not self.saved):  # save images to an HTML file if they haven't been saved.
             self.saved = True
             # save images to the disk
@@ -132,7 +163,7 @@ class Visualizer:
             webpage.save()
 
     def plot_current_losses(self, total_iters, losses):
-        """Log current losses to wandb
+        """Log current losses to wandb and tensorboard
 
         Parameters:
             total_iters (int)     -- current training iteration during this epoch
@@ -144,6 +175,9 @@ class Visualizer:
 
         if self.use_wandb:
             self.wandb_run.log(losses, step=total_iters)
+        if self.use_tensorboard and self.tensorboard_writer is not None:
+            for loss_name, loss_value in losses.items():
+                self.tensorboard_writer.add_scalar(f"loss/{loss_name}", loss_value, total_iters)
 
     def print_current_losses(self, epoch, iters, losses, t_comp, t_data):
         """print current losses on console; also save the losses to the disk
@@ -166,3 +200,9 @@ class Visualizer:
         if local_rank == 0:
             with open(self.log_name, "a") as log_file:
                 log_file.write(f"{message}\n")  # save the message
+
+    def close(self):
+        """Close tensorboard writer if exists"""
+        if hasattr(self, 'tensorboard_writer') and self.tensorboard_writer is not None:
+            self.tensorboard_writer.close()
+        # wandb does not need explicit close
