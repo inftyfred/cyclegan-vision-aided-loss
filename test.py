@@ -28,6 +28,7 @@ See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-a
 """
 
 import os
+import time
 from pathlib import Path
 from options.test_options import TestOptions
 from data import create_dataset
@@ -66,14 +67,53 @@ if __name__ == "__main__":
     # For [CycleGAN]: It should not affect CycleGAN as CycleGAN uses instancenorm without dropout.
     if opt.eval:
         model.eval()
+
+    # Initialize timing variables
+    inference_times = []
+    use_cuda = torch.cuda.is_available()
+
     for i, data in enumerate(dataset):
         if i >= opt.num_test:  # only apply our model to opt.num_test images.
             break
         model.set_input(data)  # unpack data from data loader
+
+        # Measure inference time
+        if use_cuda:
+            torch.cuda.synchronize()
+        start_time = time.perf_counter()
+
         model.test()  # run inference
+
+        if use_cuda:
+            torch.cuda.synchronize()
+        end_time = time.perf_counter()
+
+        # Calculate inference time in milliseconds
+        inference_time_ms = (end_time - start_time) * 1000.0
+        inference_times.append(inference_time_ms)
+
         visuals = model.get_current_visuals()  # get image results
         img_path = model.get_image_paths()  # get image paths
-        if i % 5 == 0:  # save images to an HTML file
+
+        # Print inference time for each image
+        print(f"Image {i:04d}: {img_path} - Inference time: {inference_time_ms:.2f} ms")
+
+        if i % 5 == 0:  # save images to an HTML file (original behavior)
             print(f"processing ({i:04d})-th image... {img_path}")
         save_images(webpage, visuals, img_path, aspect_ratio=opt.aspect_ratio, width=opt.display_winsize)
+
+    # Print timing statistics
+    if inference_times:
+        avg_time = sum(inference_times) / len(inference_times)
+        min_time = min(inference_times)
+        max_time = max(inference_times)
+        print("\n" + "="*60)
+        print("Inference Time Statistics:")
+        print(f"  Number of images processed: {len(inference_times)}")
+        print(f"  Average inference time: {avg_time:.2f} ms")
+        print(f"  Minimum inference time: {min_time:.2f} ms")
+        print(f"  Maximum inference time: {max_time:.2f} ms")
+        print(f"  Total inference time: {sum(inference_times):.2f} ms")
+        print("="*60)
+
     webpage.save()  # save the HTML
