@@ -15,6 +15,25 @@ except ImportError:
     SummaryWriter = None
 
 
+def _min_max_for_label(opt, label):
+    """Return (min_val, max_val) for denormalizing a visual by its label (16-bit mode).
+
+    Conventions:
+      label ending in '_A' → domain A min/max
+      label ending in '_B' → domain B min/max
+      other (test mode)    → domain A min/max
+    Returns (None, None) for 8-bit mode.
+    """
+    if getattr(opt, "bit_depth", 8) == 16:
+        if label.endswith("_A"):
+            return opt.min_A, opt.max_A
+        elif label.endswith("_B"):
+            return getattr(opt, "min_B", opt.min_A), getattr(opt, "max_B", opt.max_A)
+        else:
+            return opt.min_A, opt.max_A
+    return None, None
+
+
 def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
     """Save images to the disk.
 
@@ -29,11 +48,13 @@ def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
     """
     image_dir = webpage.get_image_dir()
     name = Path(image_path[0]).stem
+    opt = webpage.opt  # retrieve opt for 16-bit min/max
 
     webpage.add_header(name)
     ims, txts, links = [], [], []
     for label, im_data in visuals.items():
-        im = util.tensor2im(im_data)
+        min_val, max_val = _min_max_for_label(opt, label)
+        im = util.tensor2im(im_data, min_val=min_val, max_val=max_val)
         image_name = f"{name}_{label}.png"
         save_path = image_dir / image_name
         util.save_image(im, save_path, aspect_ratio=aspect_ratio)
@@ -86,7 +107,11 @@ class Visualizer:
             else:
                 # Only initialize tensorboard on main process (rank 0)
                 if not dist.is_initialized() or dist.get_rank() == 0:
-                    self.tensorboard_dir = Path(opt.checkpoints_dir) / opt.name / "tensorboard"
+                    from datetime import datetime
+                    time_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    run_dir = Path(opt.checkpoints_dir) / opt.name / "tensorboard" / f"run-{time_str}"
+                    event_dir = run_dir / f"event-{time_str}.0"
+                    self.tensorboard_dir = event_dir #Path(opt.checkpoints_dir) / opt.name / "tensorboard" / f"run-{time_str}"
                     util.mkdirs([self.tensorboard_dir])
                     self.tensorboard_writer = SummaryWriter(log_dir=self.tensorboard_dir)
                     print(f"TensorBoard logging enabled. Logs saved to {self.tensorboard_dir}")
@@ -125,16 +150,28 @@ class Visualizer:
 
         if self.use_wandb:
             ims_dict = {}
-            for label, image in visuals.items():
-                image_numpy = util.tensor2im(image)
+            for label, img_tensor in visuals.items():
+                min_val, max_val = _min_max_for_label(self.opt, label)
+                image_numpy = util.tensor2im(img_tensor, min_val=min_val, max_val=max_val)
                 wandb_image = wandb.Image(image_numpy, caption=f"{label} - Step {total_iters}")
                 ims_dict[f"results/{label}"] = wandb_image
             self.wandb_run.log(ims_dict, step=total_iters)
 
         if self.use_tensorboard and self.tensorboard_writer is not None:
-            for label, image in visuals.items():
-                image_numpy = util.tensor2im(image)
-                # Convert numpy array to tensor for tensorboard (HWC uint8)
+            for label, img_tensor in visuals.items():
+                min_val, max_val = _min_max_for_label(self.opt, label)
+                image_numpy = util.tensor2im(img_tensor, min_val=min_val, max_val=max_val)
+                # Normalize to [0,1] for tensorboard
+                if image_numpy.dtype == np.uint16:
+                    float_img = image_numpy.astype(np.float32)
+                    if min_val is not None and max_val is not None and max_val > min_val:
+                        float_img = (float_img - min_val) / (max_val - min_val) * 255.0
+                    else:
+                        float_img = float_img / 65535.0 * 255.0
+                    image_numpy_8bit = np.clip(float_img, 0, 255).astype(np.uint8)
+                    if image_numpy_8bit.ndim == 2:
+                        image_numpy_8bit = np.stack([image_numpy_8bit] * 3, axis=-1)
+                    image_numpy = image_numpy_8bit
                 import torch
                 image_tensor = torch.from_numpy(image_numpy).float() / 255.0  # normalize to [0,1]
                 # TensorBoard expects CHW format, but we can use dataformats='HWC'
@@ -143,13 +180,14 @@ class Visualizer:
         if self.use_html and (save_result or not self.saved):  # save images to an HTML file if they haven't been saved.
             self.saved = True
             # save images to the disk
-            for label, image in visuals.items():
-                image_numpy = util.tensor2im(image)
+            for label, img_tensor in visuals.items():
+                min_val, max_val = _min_max_for_label(self.opt, label)
+                image_numpy = util.tensor2im(img_tensor, min_val=min_val, max_val=max_val)
                 img_path = self.img_dir / f"epoch{epoch:03d}_{label}.png"
                 util.save_image(image_numpy, img_path)
 
             # update website
-            webpage = html.HTML(self.web_dir, f"Experiment name = {self.name}", refresh=1)
+            webpage = html.HTML(self.web_dir, f"Experiment name = {self.name}", refresh=1, opt=self.opt)
             for n in range(epoch, 0, -1):
                 webpage.add_header(f"epoch [{n}]")
                 ims, txts, links = [], [], []

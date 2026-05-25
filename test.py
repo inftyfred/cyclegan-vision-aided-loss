@@ -28,6 +28,8 @@ See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-a
 """
 
 import os
+import json
+import shutil
 import time
 from pathlib import Path
 from options.test_options import TestOptions
@@ -36,6 +38,7 @@ from models import create_model
 from util.visualizer import save_images
 from util import html
 import torch
+from datetime import datetime
 
 try:
     import wandb
@@ -51,17 +54,40 @@ if __name__ == "__main__":
     opt.batch_size = 1  # test code only supports batch_size = 1
     opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
     opt.no_flip = True  # no flip; comment this line if results on flipped images are needed.
-    
+
+    # Load 16-bit min/max from training config.json (skip re-scanning)
+    if opt.bit_depth == 16:
+        config_path = Path(opt.checkpoints_dir) / opt.name / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+            opt.min_A = config.get("min_A")
+            opt.max_A = config.get("max_A")
+            opt.min_B = config.get("min_B")
+            opt.max_B = config.get("max_B")
+            print(f"Loaded 16-bit min/max from {config_path}: "
+                  f"min_A={opt.min_A}, max_A={opt.max_A}, "
+                  f"min_B={opt.min_B}, max_B={opt.max_B}")
+        else:
+            print(f"Warning: {config_path} not found, will re-scan dataset for min/max.")
+
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     model = create_model(opt)  # create a model given opt.model and other options
     model.setup(opt)  # regular setup: load and print networks; create schedulers
 
     # create a website
+    if opt.direction == "AtoB":
+        dir_suffix = f"{opt.domainA}2{opt.domainB}"
+    else:
+        dir_suffix = f"{opt.domainB}2{opt.domainA}"
+    time_str = datetime.now().strftime("%Y%m%d-%H%M%S")
+    #base_name = f"{opt.phase}_{opt.epoch}" + f"_{time_str}"
     web_dir = Path(opt.results_dir) / opt.name / f"{opt.phase}_{opt.epoch}"  # define the website directory
     if opt.load_iter > 0:  # load_iter is 0 by default
         web_dir = Path(f"{web_dir}_iter{opt.load_iter}")
+    web_dir = Path(f"{web_dir}"f"_{dir_suffix}"f"_{time_str}")
     print(f"creating web directory {web_dir}")
-    webpage = html.HTML(web_dir, f"Experiment = {opt.name}, Phase = {opt.phase}, Epoch = {opt.epoch}")
+    webpage = html.HTML(web_dir, f"Experiment = {opt.name}, Phase = {opt.phase}, Epoch = {opt.epoch}", opt=opt)
     # test with eval mode. This only affects layers like batchnorm and dropout.
     # For [pix2pix]: we use batchnorm and dropout in the original pix2pix. You can experiment it with and without eval() mode.
     # For [CycleGAN]: It should not affect CycleGAN as CycleGAN uses instancenorm without dropout.
@@ -117,3 +143,10 @@ if __name__ == "__main__":
         print("="*60)
 
     webpage.save()  # save the HTML
+
+    # Also save to a fixed latest_* directory for easy frontend access
+    latest_dir = Path(opt.results_dir) / opt.name / f"test_latest"
+    if latest_dir.exists():
+        shutil.rmtree(latest_dir)
+    shutil.copytree(web_dir, latest_dir)
+    print(f"Latest results also saved to {latest_dir}")

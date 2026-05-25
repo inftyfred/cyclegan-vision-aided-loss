@@ -121,17 +121,19 @@ class BaseModel(ABC):
                     #state_dict = torch.load(load_path, map_location=str(self.device), weights_only=True)
                     try:
                         state_dict = torch.load(load_path, map_location=str(self.device), weights_only=True)
+                        #state_dict = torch.load(load_path, map_location=str(self.device))
                     except TypeError as e:
                         if 'weights_only' in str(e):
                             state_dict = torch.load(load_path, map_location=str(self.device))
-                            print(f"警告: PyTorch版本不支持weights_only参数，已降级加载。请考虑升级PyTorch以获得更好的安全性。警告信息: {e}")
+                            #print(f"警告: PyTorch版本不支持weights_only参数，已降级加载。请考虑升级PyTorch以获得更好的安全性。警告信息: {e}")
+                            print(f"weight_only已使用降级加载。")
                         else :
                             raise
                     except Exception as e:
                         print(f"加载模型失败: {e}")
-                        raise                
-                    
-                    
+                        raise   
+
+
                     if hasattr(state_dict, "_metadata"):
                         del state_dict._metadata
 

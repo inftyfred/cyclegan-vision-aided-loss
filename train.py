@@ -20,11 +20,13 @@ See frequently asked questions at: https://github.com/junyanz/pytorch-CycleGAN-a
 """
 
 import time
+import json
+from pathlib import Path
 from options.train_options import TrainOptions
 from data import create_dataset
 from models import create_model
 from util.visualizer import Visualizer
-from util.util import init_ddp, cleanup_ddp
+from util.util import init_ddp, cleanup_ddp, mkdirs
 
 
 if __name__ == "__main__":
@@ -36,6 +38,12 @@ if __name__ == "__main__":
 
     model = create_model(opt)  # create a model given opt.model and other options
     model.setup(opt)  # regular setup: load and print networks; create schedulers
+    # Save full config to checkpoints folder (includes dynamically computed min/max from dataset)
+    config_path = Path(opt.checkpoints_dir) / opt.name / "config.json"
+    mkdirs([config_path.parent])
+    with open(config_path, "w") as f:
+        json.dump(vars(opt), f, indent=2, default=str)
+    print(f"Config saved to {config_path}")
     visualizer = Visualizer(opt)  # create a visualizer that display/save images and plots
     total_iters = 0  # the total number of training iterations
     for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):

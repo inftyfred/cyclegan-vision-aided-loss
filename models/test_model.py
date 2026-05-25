@@ -48,7 +48,12 @@ class TestModel(BaseModel):
                 else:
                     raise ValueError(f"Invalid direction: {opt.direction}. Must be 'AtoB' or 'BtoA'.")
                 print(f"Auto-generated model_suffix: {opt.model_suffix}")
-
+            else:
+                if opt.direction == "AtoB":
+                        opt.model_suffix = f"_{opt.domainA}"
+                elif opt.direction == "BtoA":
+                        opt.model_suffix = f"_{opt.domainB}"
+                print(f"Auto-generated model_suffix: {opt.model_suffix}")
         # specify the training losses you want to print out. The training/test scripts  will call <BaseModel.get_current_losses>
         self.loss_names = []
         # specify the images you want to save/display. The training/test scripts  will call <BaseModel.get_current_visuals>

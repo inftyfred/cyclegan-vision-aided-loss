@@ -9,25 +9,40 @@ import torch.distributed as dist
 import os
 
 
-def tensor2im(input_image, imtype=np.uint8):
-    """ "Converts a Tensor array into a numpy image array.
+def tensor2im(input_image, imtype=np.uint8, min_val=None, max_val=None):
+    """Converts a Tensor array into a numpy image array.
 
     Parameters:
         input_image (tensor) --  the input image tensor array
         imtype (type)        --  the desired type of the converted numpy array
+        min_val (float)      --  for 16-bit: minimum pixel value (original range)
+        max_val (float)      --  for 16-bit: maximum pixel value (original range)
+
+    For standard 8-bit (min/max None): [-1, 1] → [0, 255] uint8 (3-channel RGB)
+    For 16-bit (min/max provided): [-1, 1] → [min_val, max_val] uint16 (1-channel grayscale)
     """
-    if not isinstance(input_image, np.ndarray):
-        if isinstance(input_image, torch.Tensor):  # get the data from a variable
-            image_tensor = input_image.data
+    if isinstance(input_image, np.ndarray):
+        return input_image
+
+    image_tensor = input_image.data if isinstance(input_image, torch.Tensor) else input_image
+    image_numpy = image_tensor[0].cpu().float().numpy()  # convert it into a numpy array
+
+    if min_val is not None and max_val is not None:
+        # 16-bit: [-1, 1] → [min_val, max_val], single channel
+        image_numpy = (image_numpy + 1.0) / 2.0  # [0, 1]
+        image_numpy = image_numpy * (max_val - min_val) + min_val
+        # (C, H, W) → (H, W) for single channel
+        if image_numpy.shape[0] == 1:
+            image_numpy = image_numpy[0]
         else:
-            return input_image
-        image_numpy = image_tensor[0].cpu().float().numpy()  # convert it into a numpy array
+            image_numpy = np.transpose(image_numpy, (1, 2, 0))
+        return image_numpy.astype(np.uint16)
+    else:
+        # Standard 8-bit: [-1, 1] → [0, 255]
         if image_numpy.shape[0] == 1:  # grayscale to RGB
             image_numpy = np.tile(image_numpy, (3, 1, 1))
-        image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0  # post-processing: tranpose and scaling
-    else:  # if it is a numpy array, do nothing
-        image_numpy = input_image
-    return image_numpy.astype(imtype)
+        image_numpy = (np.transpose(image_numpy, (1, 2, 0)) + 1) / 2.0 * 255.0
+        return image_numpy.astype(imtype)
 
 
 def diagnose_network(net, name="network"):
@@ -81,16 +96,22 @@ def save_image(image_numpy, image_path, aspect_ratio=1.0):
     Parameters:
         image_numpy (numpy array) -- input numpy array
         image_path (str)          -- the path of the image
+        aspect_ratio (float)      -- aspect ratio (ignored for 16-bit single-channel)
     """
 
-    image_pil = Image.fromarray(image_numpy)
-    h, w, _ = image_numpy.shape
+    if image_numpy.ndim == 2:
+        # 16-bit single-channel image
+        image_pil = Image.fromarray(image_numpy)
+        image_pil.save(image_path)
+    else:
+        image_pil = Image.fromarray(image_numpy)
+        h, w, _ = image_numpy.shape
 
-    if aspect_ratio > 1.0:
-        image_pil = image_pil.resize((h, int(w * aspect_ratio)), Image.BICUBIC)
-    if aspect_ratio < 1.0:
-        image_pil = image_pil.resize((int(h / aspect_ratio), w), Image.BICUBIC)
-    image_pil.save(image_path)
+        if aspect_ratio > 1.0:
+            image_pil = image_pil.resize((h, int(w * aspect_ratio)), Image.BICUBIC)
+        if aspect_ratio < 1.0:
+            image_pil = image_pil.resize((int(h / aspect_ratio), w), Image.BICUBIC)
+        image_pil.save(image_path)
 
 
 def print_numpy(x, val=True, shp=False):

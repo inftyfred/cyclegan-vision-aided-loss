@@ -11,17 +11,19 @@ class HTML:
     It is based on Python library 'dominate', a Python library for creating and manipulating HTML documents using a DOM API.
     """
 
-    def __init__(self, web_dir, title, refresh=0):
+    def __init__(self, web_dir, title, refresh=0, opt=None):
         """Initialize the HTML classes
 
         Parameters:
             web_dir (str) -- a directory that stores the webpage. HTML file will be created at <web_dir>/index.html; images will be saved at <web_dir/images/
             title (str)   -- the webpage name
             refresh (int) -- how often the website refresh itself; if 0; no refreshing
+            opt (object)  -- experiment options (used for 16-bit min/max lookup)
         """
         self.title = title
         self.web_dir = Path(web_dir)
         self.img_dir = self.web_dir / "images"
+        self.opt = opt
 
         self.web_dir.mkdir(parents=True, exist_ok=True)
         self.img_dir.mkdir(parents=True, exist_ok=True)

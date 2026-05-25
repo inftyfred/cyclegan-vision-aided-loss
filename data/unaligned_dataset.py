@@ -1,4 +1,5 @@
 import os
+import numpy as np
 from data.base_dataset import BaseDataset, get_transform
 from data.image_folder import make_dataset
 from PIL import Image
@@ -66,8 +67,65 @@ class UnalignedDataset(BaseDataset):
         btoA = self.opt.direction == "BtoA"
         input_nc = self.opt.output_nc if btoA else self.opt.input_nc  # get the number of channels of input image
         output_nc = self.opt.input_nc if btoA else self.opt.output_nc  # get the number of channels of output image
-        self.transform_A = get_transform(self.opt, grayscale=(input_nc == 1))
-        self.transform_B = get_transform(self.opt, grayscale=(output_nc == 1))
+
+        # 16-bit: pre-scan datasets for robust percentile-based normalization
+        if opt.bit_depth == 16:
+            if getattr(opt, "min_A", None) is not None and getattr(opt, "min_B", None) is not None \
+               and getattr(opt, "max_A", None) is not None and getattr(opt, "max_B", None) is not None:
+                global_min = min(opt.min_A, opt.min_B)
+                global_max = max(opt.max_A, opt.max_B)
+                print(f"Using pre-set min/max from config: global range=[{global_min:.0f}, {global_max:.0f}]")
+            else:
+                print("Scanning domain A (16-bit, 1st/99th percentile)...")
+                p1_A, p99_A = self._scan_dataset(self.A_paths)
+                print("Scanning domain B (16-bit, 1st/99th percentile)...")
+                p1_B, p99_B = self._scan_dataset(self.B_paths)
+                # Shared global range across both domains
+                global_min = min(p1_A, p1_B)
+                global_max = max(p99_A, p99_B)
+                opt.min_A = opt.min_B = global_min
+                opt.max_A = opt.max_B = global_max
+                print(f"  Domain A P1/P99: {p1_A:.0f}/{p99_A:.0f}")
+                print(f"  Domain B P1/P99: {p1_B:.0f}/{p99_B:.0f}")
+                print(f"  Shared global range: [{global_min:.0f}, {global_max:.0f}]")
+
+            self.transform_A = get_transform(self.opt, grayscale=(input_nc == 1),
+                                             bit_depth=16, min_val=global_min, max_val=global_max)
+            self.transform_B = get_transform(self.opt, grayscale=(output_nc == 1),
+                                             bit_depth=16, min_val=global_min, max_val=global_max)
+        else:
+            self.transform_A = get_transform(self.opt, grayscale=(input_nc == 1))
+            self.transform_B = get_transform(self.opt, grayscale=(output_nc == 1))
+
+    def _scan_dataset(self, paths):
+        """Scan all images to find 1st and 99th percentile pixel values.
+
+        Uses adaptive stride subsampling for memory efficiency.
+        The 1%/99% range is robust against outlier pixels that would
+        stretch global min/max normalization.
+
+        Parameters:
+            paths (list of str) -- paths to images
+
+        Returns:
+            tuple[float, float]: (p1, p99) across all images
+        """
+        all_samples = []
+        total = len(paths)
+        for i, path in enumerate(paths):
+            if i % 500 == 0:
+                print(f"    Scanning 16-bit images: {i}/{total}")
+            img = Image.open(path)
+            arr = np.array(img, dtype=np.float32).ravel()
+            # Adaptive stride: target ~2000 evenly-spaced samples per image
+            stride = max(1, len(arr) // 2000)
+            all_samples.append(arr[::stride])
+
+        all_samples = np.concatenate(all_samples)
+        p1, p99 = np.percentile(all_samples, [1, 99])
+        print(f"    Scanned {total} images, P1={p1:.0f}, P99={p99:.0f} "
+              f"(from {len(all_samples):,} samples)")
+        return float(p1), float(p99)
 
     def __getitem__(self, index):
         """Return a data point and its metadata information.
@@ -87,8 +145,12 @@ class UnalignedDataset(BaseDataset):
         else:  # randomize the index for domain B to avoid fixed pairs.
             index_B = random.randint(0, self.B_size - 1)
         B_path = self.B_paths[index_B]
-        A_img = Image.open(A_path).convert("RGB")
-        B_img = Image.open(B_path).convert("RGB")
+        if self.opt.bit_depth == 16:
+            A_img = Image.open(A_path)  # keep I;16 mode, no .convert("RGB")
+            B_img = Image.open(B_path)
+        else:
+            A_img = Image.open(A_path).convert("RGB")
+            B_img = Image.open(B_path).convert("RGB")
         # apply image transformation
         A = self.transform_A(A_img)
         B = self.transform_B(B_img)

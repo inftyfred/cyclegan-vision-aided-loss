@@ -5,6 +5,7 @@ It also includes common transformation functions (e.g., get_transform, __scale_w
 
 import random
 import numpy as np
+import torch
 import torch.utils.data as data
 from PIL import Image
 import torchvision.transforms as transforms
@@ -79,10 +80,44 @@ def get_params(opt, size):
     return {"crop_pos": (x, y), "flip": flip}
 
 
-def get_transform(opt, params=None, grayscale=False, method=transforms.InterpolationMode.BICUBIC, convert=True):
+class ToTensor16Bit:
+    """Convert PIL I;16 image to float32 tensor, preserving original pixel values (0-65535)."""
+
+    def __call__(self, pic):
+        arr = np.array(pic, dtype=np.float32)
+        if arr.ndim == 2:
+            arr = arr[:, :, np.newaxis]
+        tensor = torch.from_numpy(arr.transpose((2, 0, 1)))
+        return tensor
+
+
+class MinMaxNormalize:
+    """Normalize a float32 tensor from [min_val, max_val] to [-1, 1], with optional hard clipping."""
+
+    def __init__(self, min_val, max_val, clamp=True):
+        self.min_val = float(min_val)
+        self.max_val = float(max_val)
+        self.range = self.max_val - self.min_val
+        self.clamp = clamp
+
+    def __call__(self, tensor):
+        if self.clamp:
+            tensor = tensor.clamp(self.min_val, self.max_val)
+        if self.range < 1e-8:
+            return torch.zeros_like(tensor)
+        return -1.0 + 2.0 * (tensor - self.min_val) / self.range
+
+
+def get_transform(opt, params=None, grayscale=False, method=transforms.InterpolationMode.BICUBIC, convert=True, bit_depth=8, min_val=None, max_val=None):
     transform_list = []
-    if grayscale:
-        transform_list.append(transforms.Grayscale(1))
+    if bit_depth == 16:
+        # For 16-bit I;16 images, use BILINEAR (BICUBIC can be unreliable on I;16 in some PIL versions)
+        if method == transforms.InterpolationMode.BICUBIC:
+            method = transforms.InterpolationMode.BILINEAR
+    else:
+        if grayscale:
+            transform_list.append(transforms.Grayscale(1))
+
     if "resize" in opt.preprocess:
         osize = [opt.load_size, opt.load_size]
         transform_list.append(transforms.Resize(osize, method))
@@ -105,11 +140,17 @@ def get_transform(opt, params=None, grayscale=False, method=transforms.Interpola
             transform_list.append(transforms.Lambda(lambda img: __flip(img, params["flip"])))
 
     if convert:
-        transform_list += [transforms.ToTensor()]
-        if grayscale:
-            transform_list += [transforms.Normalize((0.5,), (0.5,))]
+        if bit_depth == 16:
+            transform_list.append(ToTensor16Bit())
+            if min_val is None or max_val is None:
+                raise ValueError("min_val and max_val are required when bit_depth=16")
+            transform_list.append(MinMaxNormalize(min_val, max_val, clamp=False))
         else:
-            transform_list += [transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+            transform_list += [transforms.ToTensor()]
+            if grayscale:
+                transform_list += [transforms.Normalize((0.5,), (0.5,))]
+            else:
+                transform_list += [transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     return transforms.Compose(transform_list)
 
 

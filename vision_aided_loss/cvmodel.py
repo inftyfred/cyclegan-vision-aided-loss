@@ -94,7 +94,15 @@ class CLIP(torch.nn.Module):
         )
 
         self.cv_type = cv_type
-        self.model, _ = clip.load("ViT-B/32", jit=False, device='cpu')
+        #self.model, _ = clip.load("ViT-B/32", jit=False, device='cpu')
+        try:
+            # 优先尝试从默认缓存/官方源加载
+            self.model, _ = clip.load("ViT-B/32", jit=False, device='cpu')
+        except (FileNotFoundError, RuntimeError, OSError) as e:
+            # 如果失败（例如网络问题或未下载），则从本地预下载路径加载
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            model_path = os.path.join(script_dir, "pretrain_model", "clip", "ViT-B-32.pt")
+            self.model, _ = clip.load(model_path, jit=False, device='cpu')
         self.model = self.model.visual
         self.model.eval()
         self.model.requires_grad = False

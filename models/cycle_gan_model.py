@@ -60,10 +60,10 @@ class CycleGANModel(BaseModel):
             parser.add_argument("--cv_type", type=str, default="clip", help="pretrained model type for vision-aided loss (e.g., clip, dino, swin, vgg)")
             parser.add_argument("--cv_output_type", type=str, default="conv_multi_level", help="output type for vision-aided discriminator (e.g., conv, conv_multi_level)")
             parser.add_argument("--cv_loss", type=str, default="multilevel_sigmoid_s", help="loss type for vision-aided discriminator (e.g., sigmoid, multilevel_sigmoid_s, hinge)")
-            parser.add_argument("--cv_lambda", type=float, default=1.0, help="weight for vision-aided loss")
+            parser.add_argument("--cv_lambda", type=float, default=0.5, help="weight for vision-aided loss")
             parser.add_argument("--cv_diffaug", action="store_true", default=True, help="whether to use DiffAugment in vision-aided discriminator (default: True)")
             parser.add_argument("--cv_lr", type=float, default=0.0002, help="learning rate for vision-aided discriminator decoder")
-            parser.add_argument("--cv_warmup_iter", type=int, default=0, help="number of warmup iterations before applying vision-aided loss (default: 0)")
+            parser.add_argument("--cv_warmup_iter", type=int, default=2000, help="number of warmup iterations before applying vision-aided loss (default: 0)")
 
         return parser
 

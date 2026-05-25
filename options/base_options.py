@@ -60,6 +60,8 @@ class BaseOptions:
         parser.add_argument("--wandb_project_name", type=str, default="CycleGAN-and-pix2pix", help="specify wandb project name")
         # tensorboard parameters
         parser.add_argument("--use_tensorboard", action="store_true", help="if specified, then init tensorboard logging")
+        # image bit depth
+        parser.add_argument("--bit_depth", type=int, default=8, help="bit depth of input images: 8 or 16 (default: 8)")
         self.initialized = True
         return parser
 
