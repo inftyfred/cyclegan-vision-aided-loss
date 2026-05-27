@@ -55,21 +55,23 @@ if __name__ == "__main__":
     opt.serial_batches = True  # disable data shuffling; comment this line if results on randomly chosen images are needed.
     opt.no_flip = True  # no flip; comment this line if results on flipped images are needed.
 
-    # Load 16-bit min/max from training config.json (skip re-scanning)
-    if opt.bit_depth == 16:
-        config_path = Path(opt.checkpoints_dir) / opt.name / "config.json"
-        if config_path.exists():
-            with open(config_path) as f:
-                config = json.load(f)
-            opt.min_A = config.get("min_A")
-            opt.max_A = config.get("max_A")
-            opt.min_B = config.get("min_B")
-            opt.max_B = config.get("max_B")
-            print(f"Loaded 16-bit min/max from {config_path}: "
-                  f"min_A={opt.min_A}, max_A={opt.max_A}, "
-                  f"min_B={opt.min_B}, max_B={opt.max_B}")
-        else:
-            print(f"Warning: {config_path} not found, will re-scan dataset for min/max.")
+    # Load training config.json — override critical params from training
+    config_path = Path(opt.checkpoints_dir) / opt.name / "config.json"
+    if config_path.exists():
+        with open(config_path) as f:
+            config = json.load(f)
+        for key in ("input_nc", "output_nc", "bit_depth",
+                     "min_A", "max_A", "min_B", "max_B"):
+            if key in config and config[key] is not None:
+                setattr(opt, key, config[key])
+        print(f"Loaded training config from {config_path}: "
+              f"input_nc={opt.input_nc}, output_nc={opt.output_nc}, "
+              f"bit_depth={opt.bit_depth}"
+              + (f", min_A={opt.min_A}, max_A={opt.max_A}"
+                 f", min_B={opt.min_B}, max_B={opt.max_B}"
+                 if getattr(opt, "bit_depth", 8) == 16 else ""))
+    else:
+        print(f"Note: {config_path} not found, using command-line defaults.")
 
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     model = create_model(opt)  # create a model given opt.model and other options
@@ -145,7 +147,7 @@ if __name__ == "__main__":
     webpage.save()  # save the HTML
 
     # Also save to a fixed latest_* directory for easy frontend access
-    latest_dir = Path(opt.results_dir) / opt.name / f"test_latest"
+    latest_dir = Path(opt.results_dir) / opt.name / f"test_latest" 
     if latest_dir.exists():
         shutil.rmtree(latest_dir)
     shutil.copytree(web_dir, latest_dir)
