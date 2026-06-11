@@ -61,6 +61,20 @@ def save_images(webpage, visuals, image_path, aspect_ratio=1.0, width=256):
         ims.append(image_name)
         txts.append(label)
         links.append(image_name)
+
+        # 16-bit: also save an 8-bit stretched version for human viewing in HTML
+        if im.dtype == np.uint16:
+            im_min, im_max = np.percentile(im, [2, 98])
+            range_val = im_max - im_min
+            if range_val > 0:
+                im_8bit = ((im.astype(np.float32) - im_min) / range_val * 255.0)
+                im_8bit = np.clip(im_8bit, 0, 255).astype(np.uint8)
+                image_name_8bit = f"{name}_{label}_8bit.png"
+                save_path_8bit = image_dir / image_name_8bit
+                util.save_image(im_8bit, save_path_8bit, aspect_ratio=aspect_ratio)
+                ims.append(image_name_8bit)
+                txts.append(f"{label} (8bit view)")
+                links.append(image_name_8bit)
     webpage.add_images(ims, txts, links, width=width)
 
 
