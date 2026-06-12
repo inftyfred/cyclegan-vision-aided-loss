@@ -51,6 +51,7 @@ if __name__ == "__main__":
         iter_data_time = time.time()  # timer for data loading per iteration
         epoch_iter = 0  # the number of training iterations in current epoch, reset to 0 every epoch
         visualizer.reset()
+        visualizer.saved = True  # suppress intra-epoch HTML saves; save only at epoch end
         # Set epoch for DistributedSampler
         if hasattr(dataset, "set_epoch"):
             dataset.set_epoch(epoch)
@@ -65,10 +66,9 @@ if __name__ == "__main__":
             model.set_input(data)  # unpack data from dataset and apply preprocessing
             model.optimize_parameters()  # calculate loss functions, get gradients, update network weights
 
-            if total_iters % opt.display_freq == 0:  # display images on visdom and save images to a HTML file
-                save_result = total_iters % opt.update_html_freq == 0
+            if total_iters % opt.display_freq == 0:  # log images to wandb/tensorboard only
                 model.compute_visuals()
-                visualizer.display_current_results(model.get_current_visuals(), epoch, total_iters, save_result)
+                visualizer.display_current_results(model.get_current_visuals(), epoch, total_iters, save_result=False)
 
             if total_iters % opt.print_freq == 0:  # print training losses and save logging information to the disk
                 losses = model.get_current_losses()
@@ -84,6 +84,10 @@ if __name__ == "__main__":
             iter_data_time = time.time()
 
         model.update_learning_rate()  # update learning rates at the end of every epoch
+
+        # Save training visuals to HTML once per epoch
+        model.compute_visuals()
+        visualizer.display_current_results(model.get_current_visuals(), epoch, total_iters, save_result=True)
 
         if epoch % opt.save_epoch_freq == 0:  # cache our model every <save_epoch_freq> epochs
             print(f"saving the model at the end of epoch {epoch}, iters {total_iters}")
